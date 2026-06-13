@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>地球・月・太陽の大きさと距離</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  @font-face {
+    font-family: 'BIZ UDGothic';
+    src: local('BIZ UDGothic');
+  }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    font-family: 'BIZ UDGothic', 'Hiragino Sans', 'Meiryo', sans-serif;
+    background: #000;
+    color:#fff;
+  }
+  #container { position:relative; width:100vw; height:100vh; }
+  canvas { display:block; }
+
+  /* 上部パネル */
+  #topPanel {
+    position:absolute; top:0; left:0; right:0;
+    padding: 12px 16px;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.75), rgba(0,0,0,0));
+    z-index: 10;
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end;
+  }
+  h1 {
+    font-size: 1.1rem;
+    font-weight: bold;
+    margin-right: auto;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+  }
+  .modeBtn {
+    font-family: inherit;
+    font-size: 1rem;
+    padding: 10px 18px;
+    border-radius: 24px;
+    border: 2px solid #555;
+    background: rgba(30,30,40,0.85);
+    color: #fff;
+    cursor: pointer;
+    transition: all 0.2s;
+    touch-action: manipulation;
+  }
+  .modeBtn.active {
+    background: rgba(30,30,40,0.85);
+    border-color: #8fc4ff;
+    font-weight: bold;
+  }
+  .modeBtn:hover { border-color: #8fc4ff; }
+
+  /* 説明パネル */
+  #infoPanel {
+    position:absolute; bottom:0; left:0; right:0;
+    padding: 14px 16px 18px;
+    background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
+    z-index: 10;
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+  #infoPanel .title {
+    font-weight: bold;
+    font-size: 1.05rem;
+    margin-bottom: 6px;
+    color: #ffd966;
+  }
+  #infoPanel .title.distance {
+    color: #6fb3ff;
+  }
+  .dataRow {
+    display:flex; flex-wrap:wrap; gap: 14px;
+    margin-top: 6px;
+  }
+  .dataItem {
+    background: rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+  }
+  .dataItem b { color:#9fd8ff; }
+
+  /* 操作説明 */
+  #hint {
+    position:absolute;
+    bottom: 50%;
+    left: 50%;
+    transform: translate(-50%, 50%);
+    background: rgba(0,0,0,0.6);
+    padding: 14px 22px;
+    border-radius: 14px;
+    font-size: 0.95rem;
+    text-align:center;
+    z-index: 20;
+    pointer-events:none;
+    transition: opacity 1s;
+  }
+  #hint.hidden { opacity: 0; }
+
+  /* ローディング */
+  #loading {
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    background:#000; z-index:100;
+    font-size:1.1rem;
+  }
+</style>
+</head>
+<body>
+<div id="container">
+  <div id="loading">読み込み中…</div>
+
+  <div id="topPanel">
+    <button class="modeBtn active" id="btnSize">大きさ比較モード</button>
+    <button class="modeBtn" id="btnDistance">距離比較モード</button>
+    <button class="modeBtn" id="btnReset">視点リセット</button>
+  </div>
+
+  <div id="hint">ドラッグで視点回転 / ピンチ・スクロールで拡大縮小</div>
+
+  <div id="infoPanel">
+    <div class="title" id="infoTitle">大きさ比較モード</div>
+    <div id="infoText">地球・月・太陽を実際の大きさの比率のまま、近づけて並べています。</div>
+    <div class="dataRow" id="dataRow"></div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+// ============================================================
+// 実際のデータ（km）
+// ============================================================
+const REAL = {
+  earthRadius: 6371,
+  moonRadius: 1737,
+  sunRadius: 696000,
+  earthMoonDist: 384400,
+  earthSunDist: 149600000
+};
+const AXIAL_TILT = 23.4 * Math.PI / 180; // 地球の地軸の傾き（ラジアン）
+
+// ============================================================
+// シーン基本構築
+// ============================================================
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.01, 1e9);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+document.getElementById('container').appendChild(renderer.domElement);
+
+// ラベル用CSS2Dレンダラー
+const labelRenderer = new CSS2DRenderer();
+labelRenderer.setSize(window.innerWidth, window.innerHeight);
+labelRenderer.domElement.style.position = 'absolute';
+labelRenderer.domElement.style.top = '0px';
+labelRenderer.domElement.style.pointerEvents = 'none';
+document.getElementById('container').appendChild(labelRenderer.domElement);
+
+function makeLabel(text, below) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  div.style.color = '#ffffff';
+  div.style.fontFamily = "'BIZ UDGothic', 'Hiragino Sans', 'Meiryo', sans-serif";
+  div.style.fontSize = '15px';
+  div.style.fontWeight = 'bold';
+  div.style.background = 'rgba(0,0,0,0.45)';
+  div.style.padding = '2px 8px';
+  div.style.borderRadius = '6px';
+  div.style.whiteSpace = 'nowrap';
+  div.style.transform = below ? 'translate(-50%, 30%)' : 'translate(-50%, -130%)';
+  return new CSS2DObject(div);
+}
+
+// 星空背景
+function createStarField(count, radius) {
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    const r = radius * (0.6 + Math.random()*0.4);
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2*Math.random() - 1);
+    positions[i*3]   = r * Math.sin(phi) * Math.cos(theta);
+    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i*3+2] = r * Math.cos(phi);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const mat = new THREE.PointsMaterial({ color: 0xffffff, size: radius*0.0015, sizeAttenuation:true });
+  return new THREE.Points(geo, mat);
+}
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.rotateSpeed = 0.6;
+controls.zoomSpeed = 1.0;
+
+// ============================================================
+// テクスチャ（プロシージャルに生成して読み込み待ちなし）
+// ============================================================
+function makeEarthTexture() {
+  const W = 1024, H = 512;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+
+  // 海
+  const ocean = ctx.createLinearGradient(0, 0, 0, H);
+  ocean.addColorStop(0, '#1a4f8a');
+  ocean.addColorStop(0.5, '#1c64b0');
+  ocean.addColorStop(1, '#1a4f8a');
+  ctx.fillStyle = ocean;
+  ctx.fillRect(0, 0, W, H);
+
+  // 経度・緯度を canvas 座標に変換
+  // lon: -180〜180 → x: 0〜W,  lat: 90〜-90 → y: 0〜H
+  function px(lon, lat) {
+    return [ (lon + 180) / 360 * W, (90 - lat) / 180 * H ];
+  }
+  // 多角形（[lon,lat]の配列）で大陸を描く
+  function landmass(points, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    points.forEach(([lon, lat], i) => {
+      const [x, y] = px(lon, lat);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  const green = '#3f8f3f';
+  const greenDark = '#347a34';
+  const greenLight = '#5fae5f';
+
+  // ユーラシア大陸（ヨーロッパ〜アジア、インド半島も含めた一体の大陸）
+  landmass([
+    // ヨーロッパ西岸〜北岸
+    [-10,36],[-5,43],[0,48],[5,58],[10,63],[15,68],[25,71],
+    [40,72],[60,73],[80,74],[105,76],[130,73],[145,72],[160,70],
+    // 東岸（シベリア〜中国沿岸）
+    [165,65],[160,60],[150,55],[140,50],[135,45],[127,40],
+    [122,33],[118,26],[112,22],[108,20],   // 中国南部〜インドシナ北部
+    // インドシナ半島
+    [106,16],[105,10],[101,5],[99,8],[98,14],[95,18],
+    // ベンガル湾〜インド半島
+    [90,22],[88,18],[85,12],[80,8],[76,12],[72,18],[70,22],
+    // アラビア海〜中東
+    [64,24],[58,24],[52,28],[48,30],[45,38],
+    // 黒海・地中海北岸〜南欧
+    [38,42],[30,40],[24,40],[18,42],[12,44],[5,43],[-2,40],[-9,38]
+  ], green);
+
+  // インド半島の先端を少し緑濃く（変化づけ）
+  landmass([
+    [73,20],[78,10],[80,8],[83,13],[80,18],[75,20]
+  ], greenDark);
+
+  // 砂漠帯（中東〜中央アジア）
+  landmass([
+    [20,30],[40,33],[60,38],[55,45],[35,42],[18,38]
+  ], greenLight);
+
+  // インドネシアあたりの島（簡素）
+  landmass([
+    [98,2],[108,-2],[118,-3],[120,-8],[110,-8],[100,-4],[96,0]
+  ], greenDark);
+  // 日本列島（簡素）
+  landmass([
+    [132,33],[138,36],[142,42],[144,44],[141,42],[136,35],[131,33]
+  ], greenDark);
+
+  // アフリカ大陸
+  landmass([
+    [-16,15],[-10,20],[0,32],[10,34],[25,32],[35,30],[42,12],[51,12],
+    [42,0],[40,-12],[35,-25],[25,-34],[18,-34],[12,-18],[8,5],[-8,5],[-16,12]
+  ], green);
+  // サハラ砂漠
+  landmass([
+    [-12,18],[10,28],[30,26],[28,16],[5,14],[-10,16]
+  ], greenLight);
+
+  // 北アメリカ大陸
+  landmass([
+    [-168,65],[-150,70],[-125,70],[-95,72],[-80,68],[-60,60],[-55,50],
+    [-65,45],[-70,42],[-75,35],[-82,28],[-97,26],[-105,22],[-115,30],
+    [-125,40],[-128,50],[-140,60],[-155,60]
+  ], green);
+  // 中央アメリカ（北アメリカと南アメリカをつなぐ陸橋）
+  landmass([
+    [-105,22],[-97,26],[-90,22],[-86,16],[-83,9],[-77,8],
+    [-80,18],[-92,16],[-100,18]
+  ], green);
+  // グリーンランド
+  landmass([
+    [-45,60],[-20,62],[-18,72],[-35,80],[-55,78],[-58,68]
+  ], '#e8eef2');
+
+  // 南アメリカ大陸
+  landmass([
+    [-80,10],[-70,12],[-60,8],[-50,0],[-45,-5],[-40,-12],[-42,-22],
+    [-50,-32],[-58,-42],[-68,-52],[-72,-50],[-72,-38],[-78,-20],
+    [-80,-5],[-82,3]
+  ], green);
+
+  // オーストラリア大陸
+  landmass([
+    [114,-22],[122,-18],[132,-12],[142,-12],[148,-20],[153,-28],
+    [148,-38],[140,-38],[130,-32],[118,-35],[113,-28]
+  ], greenLight);
+  landmass([
+    [120,-16],[140,-14],[150,-22],[145,-32],[130,-30],[118,-22]
+  ], greenDark);
+
+  // 南極大陸（下端の白い帯＋でこぼこ）
+  ctx.fillStyle = '#eef4f8';
+  ctx.beginPath();
+  ctx.moveTo(0, H);
+  for (let lon = -180; lon <= 180; lon += 20) {
+    const [x] = px(lon, 0);
+    const latEdge = -68 - Math.random() * 8;
+    const [, y] = px(lon, latEdge);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(W, H);
+  ctx.closePath();
+  ctx.fill();
+
+  // 北極の氷
+  ctx.fillStyle = 'rgba(235,242,248,0.85)';
+  ctx.fillRect(0, 0, W, 24);
+
+  return new THREE.CanvasTexture(c);
+}
+
+function makeMoonTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#bdbdbd';
+  ctx.fillRect(0,0,512,256);
+  ctx.fillStyle = 'rgba(120,120,120,0.5)';
+  for (let i=0;i<40;i++){
+    const r = 5 + Math.random()*22;
+    ctx.beginPath();
+    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(160,160,160,0.4)';
+  for (let i=0;i<200;i++){
+    const r = 0.5 + Math.random()*3;
+    ctx.beginPath();
+    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
+    ctx.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+function makeSunTexture() {
+  const c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  const ctx = c.getContext('2d');
+  const grad = ctx.createLinearGradient(0,0,512,256);
+  grad.addColorStop(0, '#fff6b0');
+  grad.addColorStop(0.5, '#ffd24a');
+  grad.addColorStop(1, '#ff9d1c');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0,0,512,256);
+  // 模様
+  ctx.fillStyle = 'rgba(255,160,0,0.3)';
+  for (let i=0;i<60;i++){
+    const r = 5 + Math.random()*30;
+    ctx.beginPath();
+    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
+    ctx.fill();
+  }
+  return new THREE.CanvasTexture(c);
+}
+
+const earthTex = makeEarthTexture();
+const moonTex = makeMoonTexture();
+const sunTex = makeSunTexture();
+
+// ============================================================
+// ライト
+// ============================================================
+const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+scene.add(ambient);
+
+// ============================================================
+// オブジェクト管理
+// ============================================================
+let earthMesh, moonMesh, sunMesh, sunLight, stars;
+let currentMode = 'size'; // 'size' or 'distance'
+
+function clearScene() {
+  // CSS2Dラベルのdom要素を明示的に削除（残留防止）
+  scene.traverse((obj) => {
+    if (obj.isCSS2DObject && obj.element && obj.element.parentNode) {
+      obj.element.parentNode.removeChild(obj.element);
+    }
+  });
+  while (scene.children.length > 0) {
+    const obj = scene.children[0];
+    scene.remove(obj);
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) {
+      if (Array.isArray(obj.material)) obj.material.forEach(m=>m.dispose());
+      else obj.material.dispose();
+    }
+  }
+  scene.add(ambient);
+}
+
+function makeSphere(radius, texture, emissive) {
+  const geo = new THREE.SphereGeometry(radius, 64, 48);
+  const mat = emissive
+    ? new THREE.MeshBasicMaterial({ map: texture })
+    : new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9, metalness: 0.0 });
+  return new THREE.Mesh(geo, mat);
+}
+
+// ------------------------------------------------------------
+// モード1: 大きさ比較（実際の比率のまま、近くに並べる）
+// ------------------------------------------------------------
+function buildSizeMode() {
+  clearScene();
+
+  // スケール: 1 unit = 2000km とする（地球が半径3.18くらいになる）
+  const SCALE = 2000;
+  const rEarth = REAL.earthRadius / SCALE;   // ≈3.19
+  const rMoon  = REAL.moonRadius / SCALE;    // ≈0.87
+  const rSun   = REAL.sunRadius / SCALE;     // ≈348
+
+  // 太陽は巨大なので、見やすいように少し離して配置
+  // 地球と月は隙間をあけて並べる
+  earthMesh = makeSphere(rEarth, earthTex, false);
+  earthMesh.position.set(0, 0, 0);
+  earthMesh.rotation.z = AXIAL_TILT; // 地軸を傾ける
+  scene.add(earthMesh);
+
+  moonMesh = makeSphere(rMoon, moonTex, false);
+  moonMesh.position.set(rEarth + rMoon + 3, 0, 0);
+  scene.add(moonMesh);
+
+  sunMesh = makeSphere(rSun, sunTex, true);
+  // 太陽は地球より遥かに大きいので、左側にやや離して配置
+  sunMesh.position.set(-(rEarth + rSun + 40), 0, 0);
+  scene.add(sunMesh);
+
+  // 太陽から照らす平行光源 + 太陽自体は自照
+  sunLight = new THREE.PointLight(0xffffff, 2.5, 0, 0);
+  sunLight.position.copy(sunMesh.position);
+  scene.add(sunLight);
+
+  // 星空
+  stars = createStarField(3000, rSun * 6);
+  scene.add(stars);
+
+  // カメラ位置: 地球と月が見やすい位置から開始
+  camera.position.set(0, rEarth*1.5, rEarth*8);
+  controls.target.set((rEarth + rMoon)/2 + 1.5, 0, 0);
+  controls.minDistance = rEarth*0.5;
+  controls.maxDistance = rSun * 4;
+  controls.update();
+
+  updateInfoForSize();
+}
+
+// ------------------------------------------------------------
+// モード2: 距離比較（実際の比率で配置）
+// ------------------------------------------------------------
+function buildDistanceMode() {
+  clearScene();
+
+  // スケール: 1 unit = 6371km（地球半径=1）にする
+  const SCALE = REAL.earthRadius;
+  const rEarth = 1;
+  const rMoon  = REAL.moonRadius / SCALE;     // ≈0.273
+  const rSun   = REAL.sunRadius / SCALE;      // ≈109.2
+
+  const distMoon = REAL.earthMoonDist / SCALE; // ≈60.3
+  const distSun  = REAL.earthSunDist / SCALE;  // ≈23481
+
+  earthMesh = makeSphere(rEarth, earthTex, false);
+  earthMesh.position.set(0, 0, 0);
+  earthMesh.rotation.z = AXIAL_TILT; // 地軸を傾ける
+  scene.add(earthMesh);
+
+  moonMesh = makeSphere(rMoon, moonTex, false);
+  moonMesh.position.set(distMoon, 0, 0);
+  scene.add(moonMesh);
+
+  sunMesh = makeSphere(rSun, sunTex, true);
+  // 太陽は反対方向（-X）に配置し、地球-月-太陽が一直線にならないよう少しYずらし軌道線で表現
+  sunMesh.position.set(-distSun, 0, 0);
+  scene.add(sunMesh);
+
+  sunLight = new THREE.PointLight(0xffffff, 2.5, 0, 0);
+  sunLight.position.copy(sunMesh.position);
+  scene.add(sunLight);
+
+  stars = createStarField(5000, distSun * 1.5);
+  scene.add(stars);
+
+  // ラベル（太陽・地球・月）
+  const labelOffset = (distSun + distMoon) * 0.012; // 全体スケールに応じた一定オフセット
+  const sunLabel = makeLabel('太陽');
+  sunLabel.position.set(0, rSun + labelOffset, 0);
+  sunMesh.add(sunLabel);
+
+  const earthLabel = makeLabel('地球');
+  earthLabel.position.set(0, labelOffset, 0);
+  earthMesh.add(earthLabel);
+
+  const moonLabel = makeLabel('月', true);
+  moonLabel.position.set(0, -labelOffset, 0);
+  moonMesh.add(moonLabel);
+
+  // カメラ初期位置：太陽から月までの全体が画面に収まるように
+  // 配置範囲は X方向に -distSun（太陽）〜 +distMoon（月）。中点を注視点にする。
+  const spanX = distSun + distMoon;           // 全体の横幅
+  const midX = (-distSun + distMoon) / 2;      // 中点
+  // 視野角50°、横幅spanXが収まるのに必要なカメラ距離（余裕をもたせる）
+  const fovRad = camera.fov * Math.PI / 180;
+  const aspect = camera.aspect;
+  // 横幅基準・縦幅基準の両方を満たす距離を取り、安全係数1.15
+  const distForWidth  = (spanX / 2) / (Math.tan(fovRad / 2) * aspect);
+  const camDist = distForWidth * 1.15;
+  camera.position.set(midX, camDist * 0.25, camDist);
+  controls.target.set(midX, 0, 0);
+  controls.minDistance = rEarth * 1.2;
+  controls.maxDistance = spanX * 2;
+  controls.update();
+
+  updateInfoForDistance();
+}
+
+// ============================================================
+// 情報パネル更新
+// ============================================================
+function fmt(num) {
+  return num.toLocaleString('ja-JP', {maximumFractionDigits: 1});
+}
+
+function updateInfoForSize() {
+  document.getElementById('infoTitle').classList.remove('distance');
+  document.getElementById('infoTitle').textContent = '大きさ比較モード';
+  document.getElementById('infoText').textContent =
+    '地球・月・太陽を、実際の半径の比率を保ったまま近くに並べています。';
+  document.getElementById('dataRow').innerHTML = `
+    <div class="dataItem">地球 半径: <b>${fmt(REAL.earthRadius)} km</b></div>
+    <div class="dataItem">月 半径: <b>${fmt(REAL.moonRadius)} km</b>（地球の約${(REAL.earthRadius/REAL.moonRadius).toFixed(1)}分の1）</div>
+    <div class="dataItem">太陽 半径: <b>${fmt(REAL.sunRadius)} km</b>（地球の約${(REAL.sunRadius/REAL.earthRadius).toFixed(0)}倍）</div>
+  `;
+}
+
+function updateInfoForDistance() {
+  document.getElementById('infoTitle').classList.add('distance');
+  document.getElementById('infoTitle').textContent = '距離比較モード';
+  document.getElementById('infoText').textContent =
+    '実際の比率のまま月・太陽までの距離と大きさを再現しています。';
+  document.getElementById('dataRow').innerHTML = `
+    <div class="dataItem">地球-月の距離: <b>約${fmt(REAL.earthMoonDist)} km</b></div>
+    <div class="dataItem">地球-太陽の距離: <b>約${fmt(REAL.earthSunDist)} km</b></div>
+    <div class="dataItem">太陽までの距離は月までの約${(REAL.earthSunDist/REAL.earthMoonDist).toFixed(0)}倍</div>
+  `;
+}
+
+// ============================================================
+// 自転・公転アニメーション
+// ============================================================
+let t = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  t += 0.005;
+
+  if (earthMesh) earthMesh.rotateY(0.003); // 傾いた地軸まわりに自転
+  if (sunMesh) sunMesh.rotation.y += 0.0008;
+  if (moonMesh) moonMesh.rotation.y += 0.001;
+
+  controls.update();
+  renderer.render(scene, camera);
+  labelRenderer.render(scene, camera);
+}
+
+// ============================================================
+// イベント
+// ============================================================
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  labelRenderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+document.getElementById('btnSize').addEventListener('click', () => {
+  if (currentMode === 'size') return;
+  currentMode = 'size';
+  document.getElementById('btnSize').classList.add('active');
+  document.getElementById('btnDistance').classList.remove('active');
+  buildSizeMode();
+});
+
+document.getElementById('btnDistance').addEventListener('click', () => {
+  if (currentMode === 'distance') return;
+  currentMode = 'distance';
+  document.getElementById('btnDistance').classList.add('active');
+  document.getElementById('btnSize').classList.remove('active');
+  buildDistanceMode();
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (currentMode === 'size') buildSizeMode();
+  else buildDistanceMode();
+});
+
+// ヒントを数秒後にフェードアウト
+setTimeout(() => {
+  document.getElementById('hint').classList.add('hidden');
+}, 4000);
+
+// ============================================================
+// 初期化
+// ============================================================
+buildSizeMode();
+document.getElementById('loading').style.display = 'none';
+animate();
+</script>
+</body>
+</html>
