@@ -52,6 +52,27 @@
   }
   .modeBtn:hover { border-color: #8fc4ff; }
 
+  /* 自転トグルなど目立たせたくないボタン */
+  .subtleBtn {
+    font-size: 0.8rem;
+    padding: 6px 14px;
+    border: 1px solid rgba(255,255,255,0.25);
+    background: rgba(20,20,28,0.5);
+    color: rgba(255,255,255,0.65);
+    opacity: 0.7;
+  }
+  .subtleBtn:hover {
+    opacity: 1;
+    border-color: rgba(255,255,255,0.5);
+  }
+  .subtleBtn.active {
+    background: rgba(20,20,28,0.5);
+    border-color: #8fc4ff;
+    color: #fff;
+    opacity: 1;
+  }
+  .subtleBtn.hidden { display: none; }
+
   /* 説明パネル */
   #infoPanel {
     position:absolute; bottom:0; left:0; right:0;
@@ -113,6 +134,7 @@
   <div id="loading">読み込み中…</div>
 
   <div id="topPanel">
+    <button class="modeBtn subtleBtn" id="btnSpin">自転する</button>
     <button class="modeBtn active" id="btnSize">大きさ比較モード</button>
     <button class="modeBtn" id="btnDistance">距離比較モード</button>
     <button class="modeBtn" id="btnReset">視点リセット</button>
@@ -584,11 +606,12 @@ function updateInfoForDistance() {
 // 自転・公転アニメーション
 // ============================================================
 let t = 0;
+let earthSpinning = false;
 function animate() {
   requestAnimationFrame(animate);
   t += 0.005;
 
-  if (earthMesh) earthMesh.rotateY(0.003); // 傾いた地軸まわりに自転
+  if (earthMesh && earthSpinning) earthMesh.rotateY(0.003); // 傾いた地軸まわりに自転
   if (sunMesh) sunMesh.rotation.y += 0.0008;
   if (moonMesh) moonMesh.rotation.y += 0.001;
 
@@ -612,6 +635,7 @@ document.getElementById('btnSize').addEventListener('click', () => {
   currentMode = 'size';
   document.getElementById('btnSize').classList.add('active');
   document.getElementById('btnDistance').classList.remove('active');
+  document.getElementById('btnSpin').classList.remove('hidden');
   buildSizeMode();
 });
 
@@ -620,12 +644,18 @@ document.getElementById('btnDistance').addEventListener('click', () => {
   currentMode = 'distance';
   document.getElementById('btnDistance').classList.add('active');
   document.getElementById('btnSize').classList.remove('active');
+  document.getElementById('btnSpin').classList.add('hidden');
   buildDistanceMode();
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {
   if (currentMode === 'size') buildSizeMode();
   else buildDistanceMode();
+});
+
+document.getElementById('btnSpin').addEventListener('click', () => {
+  earthSpinning = !earthSpinning;
+  document.getElementById('btnSpin').classList.toggle('active', earthSpinning);
 });
 
 // ヒントを数秒後にフェードアウト
