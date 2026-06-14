@@ -25,8 +25,13 @@
     padding: 12px 16px;
     background: linear-gradient(to bottom, rgba(0,0,0,0.75), rgba(0,0,0,0));
     z-index: 10;
-    display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end;
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
   }
+  #objToggles, #modeButtons {
+    display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+  }
+  .sizeOnly.hidden { display:none; }
+  #modeButtons { margin-left: auto; }
   h1 {
     font-size: 1.1rem;
     font-weight: bold;
@@ -35,10 +40,10 @@
   }
   .modeBtn {
     font-family: inherit;
-    font-size: 1rem;
-    padding: 10px 18px;
-    border-radius: 24px;
-    border: 2px solid #555;
+    font-size: 0.85rem;
+    padding: 6px 14px;
+    border-radius: 18px;
+    border: 1px solid #555;
     background: rgba(30,30,40,0.85);
     color: #fff;
     cursor: pointer;
@@ -51,6 +56,27 @@
     font-weight: bold;
   }
   .modeBtn:hover { border-color: #8fc4ff; }
+
+  /* オブジェクト表示切替チップ */
+  .toggleChip {
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 6px 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(255,255,255,0.3);
+    background: rgba(20,20,28,0.5);
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    transition: all 0.2s;
+    touch-action: manipulation;
+  }
+  .toggleChip.active {
+    background: rgba(95,174,95,0.25);
+    border-color: #8fc4ff;
+    color: #fff;
+    font-weight: bold;
+  }
+  .toggleChip:hover { border-color: #8fc4ff; }
 
   /* 説明パネル */
   #infoPanel {
@@ -113,9 +139,17 @@
   <div id="loading">読み込み中…</div>
 
   <div id="topPanel">
-    <button class="modeBtn active" id="btnSize">大きさ比較モード</button>
-    <button class="modeBtn" id="btnDistance">距離比較モード</button>
-    <button class="modeBtn" id="btnReset">視点リセット</button>
+    <div id="objToggles">
+      <button class="toggleChip sizeOnly active" data-obj="earth">地球</button>
+      <button class="toggleChip sizeOnly" data-obj="moon">月</button>
+      <button class="toggleChip sizeOnly" data-obj="sun">太陽</button>
+      <button class="toggleChip" data-obj="info">説明</button>
+    </div>
+    <div id="modeButtons">
+      <button class="modeBtn active" id="btnSize">大きさ比較モード</button>
+      <button class="modeBtn" id="btnDistance">距離比較モード</button>
+      <button class="modeBtn" id="btnReset">視点リセット</button>
+    </div>
   </div>
 
   <div id="hint">ドラッグで視点回転 / ピンチ・スクロールで拡大縮小</div>
@@ -220,6 +254,10 @@ const sunTex   = textureLoader.load(TEX_BASE + 'sun1024.jpg');
   tex.colorSpace = THREE.SRGBColorSpace;
 });
 
+// 月のテクスチャを経度方向に180°回転（東西反転）
+moonTex.wrapS = THREE.RepeatWrapping;
+moonTex.offset.x = 0.5;
+
 // ============================================================
 // ライト
 // ============================================================
@@ -231,6 +269,9 @@ scene.add(ambient);
 // ============================================================
 let earthMesh, moonMesh, sunMesh, sunLight, stars;
 let currentMode = 'size'; // 'size' or 'distance'
+
+// 大きさ比較モードでの表示・非表示状態（デフォルトは地球のみ表示）
+const visState = { earth: true, moon: false, sun: false, info: false };
 
 function clearScene() {
   // CSS2Dラベルのdom要素を明示的に削除（残留防止）
@@ -295,9 +336,16 @@ function buildSizeMode() {
   stars = createStarField(3000, rSun * 6);
   scene.add(stars);
 
-  // カメラ位置: 地球と月が見やすい位置から開始
-  camera.position.set(0, rEarth*1.5, rEarth*8);
-  controls.target.set((rEarth + rMoon)/2 + 1.5, 0, 0);
+  // 表示・非表示の状態を反映
+  earthMesh.visible = visState.earth;
+  moonMesh.visible = visState.moon;
+  sunMesh.visible = visState.sun;
+  document.querySelectorAll('.sizeOnly').forEach(el => el.classList.remove('hidden'));
+  document.getElementById('infoPanel').style.display = visState.info ? '' : 'none';
+
+  // カメラ位置: 地球が見やすい位置から開始
+  camera.position.set(0, rEarth*0.6, rEarth*3.8);
+  controls.target.set(0, 0, 0);
   controls.minDistance = rEarth*0.5;
   controls.maxDistance = rSun * 4;
   controls.update();
@@ -310,6 +358,10 @@ function buildSizeMode() {
 // ------------------------------------------------------------
 function buildDistanceMode() {
   clearScene();
+
+  // 大きさ比較モード専用の地球・月・太陽の表示切替は隠す。説明欄は切替可能（デフォルト非表示）。
+  document.querySelectorAll('.sizeOnly').forEach(el => el.classList.add('hidden'));
+  document.getElementById('infoPanel').style.display = visState.info ? '' : 'none';
 
   // スケール: 1 unit = 6371km（地球半径=1）にする
   const SCALE = REAL.earthRadius;
@@ -446,6 +498,30 @@ document.getElementById('btnDistance').addEventListener('click', () => {
 document.getElementById('btnReset').addEventListener('click', () => {
   if (currentMode === 'size') buildSizeMode();
   else buildDistanceMode();
+});
+
+// 大きさ比較モード: 地球・月・太陽・説明の表示切替
+document.querySelectorAll('.toggleChip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const key = chip.dataset.obj;
+    visState[key] = !visState[key];
+    chip.classList.toggle('active', visState[key]);
+
+    switch (key) {
+      case 'earth':
+        if (earthMesh) earthMesh.visible = visState.earth;
+        break;
+      case 'moon':
+        if (moonMesh) moonMesh.visible = visState.moon;
+        break;
+      case 'sun':
+        if (sunMesh) sunMesh.visible = visState.sun;
+        break;
+      case 'info':
+        document.getElementById('infoPanel').style.display = visState.info ? '' : 'none';
+        break;
+    }
+  });
 });
 
 // ヒントを数秒後にフェードアウト
