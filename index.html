@@ -52,27 +52,6 @@
   }
   .modeBtn:hover { border-color: #8fc4ff; }
 
-  /* 自転トグルなど目立たせたくないボタン */
-  .subtleBtn {
-    font-size: 0.8rem;
-    padding: 6px 14px;
-    border: 1px solid rgba(255,255,255,0.25);
-    background: rgba(20,20,28,0.5);
-    color: rgba(255,255,255,0.65);
-    opacity: 0.7;
-  }
-  .subtleBtn:hover {
-    opacity: 1;
-    border-color: rgba(255,255,255,0.5);
-  }
-  .subtleBtn.active {
-    background: rgba(20,20,28,0.5);
-    border-color: #8fc4ff;
-    color: #fff;
-    opacity: 1;
-  }
-  .subtleBtn.hidden { display: none; }
-
   /* 説明パネル */
   #infoPanel {
     position:absolute; bottom:0; left:0; right:0;
@@ -134,7 +113,6 @@
   <div id="loading">読み込み中…</div>
 
   <div id="topPanel">
-    <button class="modeBtn subtleBtn" id="btnSpin">自転する</button>
     <button class="modeBtn active" id="btnSize">大きさ比較モード</button>
     <button class="modeBtn" id="btnDistance">距離比較モード</button>
     <button class="modeBtn" id="btnReset">視点リセット</button>
@@ -171,7 +149,6 @@ const REAL = {
   earthMoonDist: 384400,
   earthSunDist: 149600000
 };
-const AXIAL_TILT = 23.4 * Math.PI / 180; // 地球の地軸の傾き（ラジアン）
 
 // ============================================================
 // シーン基本構築
@@ -230,191 +207,18 @@ controls.rotateSpeed = 0.6;
 controls.zoomSpeed = 1.0;
 
 // ============================================================
-// テクスチャ（プロシージャルに生成して読み込み待ちなし）
+// テクスチャ（GitHub上の画像を読み込み）
 // ============================================================
-function makeEarthTexture() {
-  const W = 1024, H = 512;
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d');
+const textureLoader = new THREE.TextureLoader();
+textureLoader.setCrossOrigin('anonymous');
 
-  // 海
-  const ocean = ctx.createLinearGradient(0, 0, 0, H);
-  ocean.addColorStop(0, '#1a4f8a');
-  ocean.addColorStop(0.5, '#1c64b0');
-  ocean.addColorStop(1, '#1a4f8a');
-  ctx.fillStyle = ocean;
-  ctx.fillRect(0, 0, W, H);
-
-  // 経度・緯度を canvas 座標に変換
-  // lon: -180〜180 → x: 0〜W,  lat: 90〜-90 → y: 0〜H
-  function px(lon, lat) {
-    return [ (lon + 180) / 360 * W, (90 - lat) / 180 * H ];
-  }
-  // 多角形（[lon,lat]の配列）で大陸を描く
-  function landmass(points, color) {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    points.forEach(([lon, lat], i) => {
-      const [x, y] = px(lon, lat);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    });
-    ctx.closePath();
-    ctx.fill();
-  }
-
-  const green = '#3f8f3f';
-  const greenDark = '#347a34';
-  const greenLight = '#5fae5f';
-
-  // ユーラシア大陸（ヨーロッパ〜アジア、インド半島も含めた一体の大陸）
-  landmass([
-    // ヨーロッパ西岸〜北岸
-    [-10,36],[-5,43],[0,48],[5,58],[10,63],[15,68],[25,71],
-    [40,72],[60,73],[80,74],[105,76],[130,73],[145,72],[160,70],
-    // 東岸（シベリア〜中国沿岸）
-    [165,65],[160,60],[150,55],[140,50],[135,45],[127,40],
-    [122,33],[118,26],[112,22],[108,20],   // 中国南部〜インドシナ北部
-    // インドシナ半島
-    [106,16],[105,10],[101,5],[99,8],[98,14],[95,18],
-    // ベンガル湾〜インド半島
-    [90,22],[88,18],[85,12],[80,8],[76,12],[72,18],[70,22],
-    // アラビア海〜中東
-    [64,24],[58,24],[52,28],[48,30],[45,38],
-    // 黒海・地中海北岸〜南欧
-    [38,42],[30,40],[24,40],[18,42],[12,44],[5,43],[-2,40],[-9,38]
-  ], green);
-
-  // インド半島の先端を少し緑濃く（変化づけ）
-  landmass([
-    [73,20],[78,10],[80,8],[83,13],[80,18],[75,20]
-  ], greenDark);
-
-  // 砂漠帯（中東〜中央アジア）
-  landmass([
-    [20,30],[40,33],[60,38],[55,45],[35,42],[18,38]
-  ], greenLight);
-
-  // インドネシアあたりの島（簡素）
-  landmass([
-    [98,2],[108,-2],[118,-3],[120,-8],[110,-8],[100,-4],[96,0]
-  ], greenDark);
-  // 日本列島（簡素）
-  landmass([
-    [132,33],[138,36],[142,42],[144,44],[141,42],[136,35],[131,33]
-  ], greenDark);
-
-  // アフリカ大陸
-  landmass([
-    [-16,15],[-10,20],[0,32],[10,34],[25,32],[35,30],[42,12],[51,12],
-    [42,0],[40,-12],[35,-25],[25,-34],[18,-34],[12,-18],[8,5],[-8,5],[-16,12]
-  ], green);
-  // サハラ砂漠
-  landmass([
-    [-12,18],[10,28],[30,26],[28,16],[5,14],[-10,16]
-  ], greenLight);
-
-  // 北アメリカ大陸
-  landmass([
-    [-168,65],[-150,70],[-125,70],[-95,72],[-80,68],[-60,60],[-55,50],
-    [-65,45],[-70,42],[-75,35],[-82,28],[-97,26],[-105,22],[-115,30],
-    [-125,40],[-128,50],[-140,60],[-155,60]
-  ], green);
-  // 中央アメリカ（北アメリカと南アメリカをつなぐ陸橋）
-  landmass([
-    [-105,22],[-97,26],[-90,22],[-86,16],[-83,9],[-77,8],
-    [-80,18],[-92,16],[-100,18]
-  ], green);
-  // グリーンランド
-  landmass([
-    [-45,60],[-20,62],[-18,72],[-35,80],[-55,78],[-58,68]
-  ], '#e8eef2');
-
-  // 南アメリカ大陸
-  landmass([
-    [-80,10],[-70,12],[-60,8],[-50,0],[-45,-5],[-40,-12],[-42,-22],
-    [-50,-32],[-58,-42],[-68,-52],[-72,-50],[-72,-38],[-78,-20],
-    [-80,-5],[-82,3]
-  ], green);
-
-  // オーストラリア大陸
-  landmass([
-    [114,-22],[122,-18],[132,-12],[142,-12],[148,-20],[153,-28],
-    [148,-38],[140,-38],[130,-32],[118,-35],[113,-28]
-  ], greenLight);
-  landmass([
-    [120,-16],[140,-14],[150,-22],[145,-32],[130,-30],[118,-22]
-  ], greenDark);
-
-  // 南極大陸（下端の白い帯＋でこぼこ）
-  ctx.fillStyle = '#eef4f8';
-  ctx.beginPath();
-  ctx.moveTo(0, H);
-  for (let lon = -180; lon <= 180; lon += 20) {
-    const [x] = px(lon, 0);
-    const latEdge = -68 - Math.random() * 8;
-    const [, y] = px(lon, latEdge);
-    ctx.lineTo(x, y);
-  }
-  ctx.lineTo(W, H);
-  ctx.closePath();
-  ctx.fill();
-
-  // 北極の氷
-  ctx.fillStyle = 'rgba(235,242,248,0.85)';
-  ctx.fillRect(0, 0, W, 24);
-
-  return new THREE.CanvasTexture(c);
-}
-
-function makeMoonTexture() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#bdbdbd';
-  ctx.fillRect(0,0,512,256);
-  ctx.fillStyle = 'rgba(120,120,120,0.5)';
-  for (let i=0;i<40;i++){
-    const r = 5 + Math.random()*22;
-    ctx.beginPath();
-    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
-    ctx.fill();
-  }
-  ctx.fillStyle = 'rgba(160,160,160,0.4)';
-  for (let i=0;i<200;i++){
-    const r = 0.5 + Math.random()*3;
-    ctx.beginPath();
-    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
-    ctx.fill();
-  }
-  return new THREE.CanvasTexture(c);
-}
-
-function makeSunTexture() {
-  const c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  const ctx = c.getContext('2d');
-  const grad = ctx.createLinearGradient(0,0,512,256);
-  grad.addColorStop(0, '#fff6b0');
-  grad.addColorStop(0.5, '#ffd24a');
-  grad.addColorStop(1, '#ff9d1c');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0,0,512,256);
-  // 模様
-  ctx.fillStyle = 'rgba(255,160,0,0.3)';
-  for (let i=0;i<60;i++){
-    const r = 5 + Math.random()*30;
-    ctx.beginPath();
-    ctx.arc(Math.random()*512, Math.random()*256, r, 0, Math.PI*2);
-    ctx.fill();
-  }
-  return new THREE.CanvasTexture(c);
-}
-
-const earthTex = makeEarthTexture();
-const moonTex = makeMoonTexture();
-const sunTex = makeSunTexture();
+const TEX_BASE = 'https://raw.githubusercontent.com/sorafjah/earth-moon-sun/main/';
+const earthTex = textureLoader.load(TEX_BASE + 'earth1024.jpg');
+const moonTex  = textureLoader.load(TEX_BASE + 'moon1024.jpg');
+const sunTex   = textureLoader.load(TEX_BASE + 'sun1024.jpg');
+[earthTex, moonTex, sunTex].forEach(tex => {
+  tex.colorSpace = THREE.SRGBColorSpace;
+});
 
 // ============================================================
 // ライト
@@ -471,7 +275,6 @@ function buildSizeMode() {
   // 地球と月は隙間をあけて並べる
   earthMesh = makeSphere(rEarth, earthTex, false);
   earthMesh.position.set(0, 0, 0);
-  earthMesh.rotation.z = AXIAL_TILT; // 地軸を傾ける
   scene.add(earthMesh);
 
   moonMesh = makeSphere(rMoon, moonTex, false);
@@ -519,7 +322,6 @@ function buildDistanceMode() {
 
   earthMesh = makeSphere(rEarth, earthTex, false);
   earthMesh.position.set(0, 0, 0);
-  earthMesh.rotation.z = AXIAL_TILT; // 地軸を傾ける
   scene.add(earthMesh);
 
   moonMesh = makeSphere(rMoon, moonTex, false);
@@ -606,14 +408,9 @@ function updateInfoForDistance() {
 // 自転・公転アニメーション
 // ============================================================
 let t = 0;
-let earthSpinning = false;
 function animate() {
   requestAnimationFrame(animate);
   t += 0.005;
-
-  if (earthMesh && earthSpinning) earthMesh.rotateY(0.003); // 傾いた地軸まわりに自転
-  if (sunMesh) sunMesh.rotation.y += 0.0008;
-  if (moonMesh) moonMesh.rotation.y += 0.001;
 
   controls.update();
   renderer.render(scene, camera);
@@ -635,7 +432,6 @@ document.getElementById('btnSize').addEventListener('click', () => {
   currentMode = 'size';
   document.getElementById('btnSize').classList.add('active');
   document.getElementById('btnDistance').classList.remove('active');
-  document.getElementById('btnSpin').classList.remove('hidden');
   buildSizeMode();
 });
 
@@ -644,18 +440,12 @@ document.getElementById('btnDistance').addEventListener('click', () => {
   currentMode = 'distance';
   document.getElementById('btnDistance').classList.add('active');
   document.getElementById('btnSize').classList.remove('active');
-  document.getElementById('btnSpin').classList.add('hidden');
   buildDistanceMode();
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {
   if (currentMode === 'size') buildSizeMode();
   else buildDistanceMode();
-});
-
-document.getElementById('btnSpin').addEventListener('click', () => {
-  earthSpinning = !earthSpinning;
-  document.getElementById('btnSpin').classList.toggle('active', earthSpinning);
 });
 
 // ヒントを数秒後にフェードアウト
